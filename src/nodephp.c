@@ -1,3 +1,6 @@
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -44,10 +47,11 @@
   while (0)
 #endif
 
-typedef struct {
+typedef struct _http_wrap_t {
   zend_object obj;
   uv_tcp_t handle;
   http_parser parser;
+  struct _http_wrap_t *parent;
   char *header;
   zval *request;
   zval *headers;
@@ -67,13 +71,16 @@ typedef struct {
 } connect_wrap_t;
 
 typedef struct {
+  zend_object obj;
   uv_write_t request;
+  uv_tcp_t *socket;
+  char *response;
   zval *callback;
   zval *string;
 #ifdef ZTS
   TSRMLS_D;
 #endif
-} write_wrap_t;
+} http_response_t;
 
 // private protocols
 uv_buf_t _http_on_alloc(uv_handle_t *client, size_t suggested_size);
@@ -86,6 +93,7 @@ int _http_on_header_value(http_parser *parser, const char *at, size_t length);
 int _http_on_headers_complete(http_parser *parser);
 int _http_on_body(http_parser *parser, const char *at, size_t length);
 int _http_on_message_complete(http_parser *parser);
+void _after_http_write(uv_write_t *request, int status);
 
 struct http_parser_settings _http_parser_settings = {
   .on_message_begin    = _http_on_message_begin,
@@ -105,6 +113,12 @@ static void http_wrap_free(void *object TSRMLS_DC) {
   http_wrap_t *wrap = (http_wrap_t*) object;
   zend_object_std_dtor(&wrap->obj TSRMLS_CC);
   efree(wrap);
+}
+
+static void http_response_free(void *object TSRMLS_DC) {
+  http_response_t *response = (http_response_t*) object;
+  zend_object_std_dtor(&response->obj TSRMLS_CC);
+  efree(response);
 }
 
 static zend_object_value http_new(zend_class_entry *class_type TSRMLS_DC) {
@@ -133,7 +147,29 @@ static zend_object_value http_new(zend_class_entry *class_type TSRMLS_DC) {
   return instance;
 }
 
-static void call_callback(zval* callback, int argc, zval* argv[] TSRMLS_DC) {
+static zend_object_value http_response_new(zend_class_entry *class_type TSRMLS_DC) {
+  zend_object_value instance;
+  http_response_t *wrap;
+
+  wrap = (http_response_t*) emalloc(sizeof *wrap);
+
+  zend_object_std_init(&wrap->obj, class_type TSRMLS_CC);
+  init_properties(&wrap->obj, class_type);
+
+  TSRMLS_SET(wrap);
+
+  instance.handle = zend_objects_store_put((void*) wrap,
+                                           (zend_objects_store_dtor_t) zend_objects_destroy_object,
+                                           http_response_free,
+                                           NULL
+                                           TSRMLS_CC);
+  instance.handlers = zend_get_std_object_handlers();
+
+  return instance;
+}
+
+
+void call_callback(zval* callback, int argc, zval *argv[] TSRMLS_DC) {
   zend_fcall_info fci = empty_fcall_info;
   zend_fcall_info_cache fci_cache = empty_fcall_info_cache;
   char *is_callable_error = NULL;
@@ -141,8 +177,7 @@ static void call_callback(zval* callback, int argc, zval* argv[] TSRMLS_DC) {
 
   if (zend_fcall_info_init(callback, 0, &fci, &fci_cache, NULL, &is_callable_error TSRMLS_CC) == SUCCESS) {
     fci.retval_ptr_ptr = &result;
-    fci.param_count = argc;
-    fci.params = &argv;
+    zend_fcall_info_argn(&fci, argc, &argv[0], &argv[1]);
     zend_call_function(&fci, &fci_cache TSRMLS_CC);
   }
 }
@@ -161,9 +196,7 @@ uv_buf_t _http_on_alloc(uv_handle_t *client, size_t suggested_size) {
 void _http_on_read(uv_stream_t *client, ssize_t nread, uv_buf_t buf) {
   if (nread > 0) {
     http_wrap_t *http_wrap = client->data;
-    char *tmp = estrndup(buf.base, nread);
-    php_printf(tmp);
-    efree(tmp);
+
     ssize_t s = http_parser_execute( &http_wrap->parser
                                    , &_http_parser_settings
                                    , buf.base
@@ -189,6 +222,8 @@ void _http_on_read(uv_stream_t *client, ssize_t nread, uv_buf_t buf) {
 int _http_on_message_begin(http_parser *parser) {
   http_wrap_t *http_wrap = parser->data;
 
+  ALLOC_INIT_ZVAL(http_wrap->request);
+  ALLOC_INIT_ZVAL(http_wrap->headers);
   array_init(http_wrap->request);
   array_init(http_wrap->headers);
 
@@ -247,9 +282,32 @@ int _http_on_body(http_parser *parser, const char *at, size_t length) {
 
 int _http_on_message_complete(http_parser *parser) {
   http_wrap_t *http_wrap = parser->data;
+  zval *cb = http_wrap->parent->connection_cb;
   zval *data = http_wrap->request;
+  zval *r_zval;
+  http_response_t *response;
+
+  // call the request callback
+  if (cb) {
+    MAKE_STD_ZVAL(r_zval);
+    Z_TYPE_P(r_zval) = IS_OBJECT;
+    zend_object_value object = http_response_new(http_server_response_ce TSRMLS_CC);
+    Z_OBJVAL_P(r_zval) = object;
+    response = (http_response_t*) zend_object_store_get_object(r_zval TSRMLS_CC);
+    response->socket = &http_wrap->handle;
+
+    zval *args[3];
+    args[0] = data;
+    args[1] = r_zval;
+
+    call_callback(cb, 2, args TSRMLS_CC);
+  }
 
   return 0;
+}
+
+void _after_http_write(uv_write_t *request, int status) {
+  // nothing to do here yet
 }
 
 // hold over code
@@ -265,7 +323,7 @@ void http_connection_cb(uv_stream_t* server_handle, int status) {
     return;
   }
 
-  /* Create container for new object */
+  /* Create container for new rerquest object */
   MAKE_STD_ZVAL(client_zval);
   Z_TYPE_P(client_zval) = IS_OBJECT;
   Z_OBJVAL_P(client_zval) = http_new(http_server_ce TSRMLS_CC);
@@ -287,16 +345,7 @@ void http_connection_cb(uv_stream_t* server_handle, int status) {
 
   client_wrap->handle.data = client_wrap;
   client_wrap->parser.data = client_wrap;
-
-  /* Call the connection callback */
-  // call this on http_parser finish instead
-  /*
-  if (self->connection_cb) {
-    zval* args[1];
-    args[0] = client_zval;
-    call_callback(self->connection_cb, 1, args TSRMLS_CC);
-  }
-  */
+  client_wrap->parent = self;
 };
 
 PHP_METHOD(node_http, listen) {
@@ -363,12 +412,64 @@ static zend_function_entry http_server_methods[] = {
   { NULL }
 };
 
-PHP_MINIT_FUNCTION(nodephp) {
-  zend_class_entry ce;
+PHP_METHOD(node_http_response, end) {
+  http_response_t *self;
+  zval *arg1;
+  char *http_res = "HTTP/1.1 200 OK\r\n"
+                   "Content-Type: text/plain\r\n"
+                   "Content-Length: %d\r\n"
+                   "\r\n%s";
 
-  INIT_CLASS_ENTRY(ce, "node_http", http_server_methods);
-  ce.create_object = http_new;
-  http_server_ce = zend_register_internal_class(&ce TSRMLS_CC);
+  if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "z", &arg1) == FAILURE) {
+    return;
+  }
+
+  if (Z_TYPE_P(arg1) != IS_STRING) {
+    return;
+  }
+
+  self = (http_response_t*) zend_object_store_get_object(getThis() TSRMLS_CC);
+
+  self->response = emalloc(strlen(http_res) + 20 + Z_STRLEN_P(arg1));
+
+  sprintf(self->response, http_res, Z_STRLEN_P(arg1), Z_STRVAL_P(arg1));
+
+  uv_buf_t buf;
+  buf.base = self->response;
+  buf.len = strlen(self->response);
+
+  uv_write( &self->request
+          , (uv_stream_t*)self->socket
+          , &buf
+          , 1
+          , _after_http_write
+          );
+
+  RETURN_NULL();
+}
+
+static zend_function_entry http_server_response_methods[] = {
+  PHP_ME(node_http_response, end, NULL, ZEND_ACC_PUBLIC)
+  { NULL }
+};
+
+PHP_MINIT_FUNCTION(nodephp) {
+  zend_class_entry http_ce;
+  zend_class_entry request_ce;
+
+  // register the http object with php
+  INIT_CLASS_ENTRY(http_ce, "node_http", http_server_methods);
+  http_ce.create_object = http_new;
+  http_server_ce = zend_register_internal_class(&http_ce TSRMLS_CC);
+
+  // register the response object with php
+  INIT_CLASS_ENTRY( request_ce
+                  , "node_http_response"
+                  , http_server_response_methods
+                  );
+  request_ce.create_object = http_response_new;
+  http_server_response_ce = zend_register_internal_class(&request_ce TSRMLS_CC);
+
 
   return SUCCESS;
 }
