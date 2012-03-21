@@ -1,8 +1,0 @@
-nodephp.lo: /Users/josephmoniz/Dropbox/workspace/node-php/src/nodephp.c
-	$(LIBTOOL) --mode=compile $(CC)  -I. -I/Users/josephmoniz/Dropbox/workspace/node-php/src $(COMMON_FLAGS) $(CFLAGS_CLEAN) $(EXTRA_CFLAGS)  -c /Users/josephmoniz/Dropbox/workspace/node-php/src/nodephp.c -o nodephp.lo 
-$(phplibdir)/nodephp.la: ./nodephp.la
-	$(LIBTOOL) --mode=install cp ./nodephp.la $(phplibdir)
-
-./nodephp.la: $(shared_objects_nodephp) $(NODEPHP_SHARED_DEPENDENCIES)
-	$(LIBTOOL) --mode=link $(CC) $(COMMON_FLAGS) $(CFLAGS_CLEAN) $(EXTRA_CFLAGS) $(LDFLAGS) -o $@ -export-dynamic -avoid-version -prefer-pic -module -rpath $(phplibdir) $(EXTRA_LDFLAGS) $(shared_objects_nodephp) $(NODEPHP_SHARED_LIBADD)
-
