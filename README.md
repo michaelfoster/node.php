@@ -21,7 +21,7 @@ You have to first manually build everything in deps/
 
     git submodule init
     git submodule update
-    make -C deps/http-parser
+    make -C deps/http-parser libhttp_parser.o
     make -C deps/libuv
     
 Then you must build the PHP module.
