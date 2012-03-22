@@ -11,9 +11,9 @@ Evented I/O for PHP
         $response->end("yay, super awesome response");
     });
     
+    nodephp_run();
+    
     ?>
-
-nodephp_run();
 
 ### To build:
 (I apologize for such the manual build process, this will be simplified)
