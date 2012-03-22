@@ -7,9 +7,3 @@ install:
 
 clean:
 	$(MAKE) -C src clean
-
-stop:
-	kill `cat /usr/local/var/run/php-fpm.pid`
-
-start:
-	/usr/local/sbin/php-fpm
