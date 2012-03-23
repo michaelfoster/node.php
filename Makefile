@@ -1,4 +1,4 @@
-nodephp.so:
+nodephp.so: $(UVDIR)/Makefile $(HTTPDIR)/Makefile
 	$(MAKE) -C src nodephp.so
 
 install:
@@ -6,3 +6,9 @@ install:
 
 clean:
 	$(MAKE) -C src clean
+
+$(UVDIR)/Makefile:
+	git submodule update --init $(UVDIR)
+
+$(HTTPDIR)/Makefile:
+	git submodule update --init $(HTTPDIR)

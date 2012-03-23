@@ -31,12 +31,6 @@ $(UVDIR)/uv.a:
 $(HTTPDIR)/libhttp_parser.o:
 	$(MAKE) -C ../deps/http-parser libhttp_parser.o
 
-$(UVDIR)/Makefile:
-	git submodule update --init $(UVDIR)
-
-$(HTTPDIR)/Makefile:
-	git submodule update --init $(HTTPDIR)
-
 install:
 	cp ./nodephp.so `php-config --extension-dir`/
 

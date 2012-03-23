@@ -16,10 +16,8 @@ Evented I/O for PHP
     ?>
 
 ### To build:
-This will get simpler as time goes on
+First build nodephp as a php module
 
-    git submodule init
-    git submodule update
     make
     sudo make install
     
