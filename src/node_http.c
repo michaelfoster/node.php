@@ -40,13 +40,13 @@ void _after_http_write(uv_write_t *request, int status);
 // register methods for the node_http class
 zend_function_entry http_server_methods[] = { 
   PHP_ME(node_http, listen, NULL, ZEND_ACC_PUBLIC)
-  { NULL }
+  NODEPHP_END_FUNCTIONS
 };
 
 // register methods for the node_http_resonse class
 zend_function_entry http_server_response_methods[] = {
   PHP_ME(node_http_response, end, NULL, ZEND_ACC_PUBLIC)
-  { NULL }
+  NODEPHP_END_FUNCTIONS
 };
 
 // ctors and dtors
@@ -111,7 +111,6 @@ void http_response_free(void *object TSRMLS_DC) {
 void _on_http_connection(uv_stream_t* server_handle, int status) {
   http_wrap_t *self = (http_wrap_t*) server_handle->data;
   http_request_t *client;
-  zval *client_zval;
   int r;
 
   TSRMLS_D_GET(self);
@@ -194,7 +193,7 @@ int _http_on_url(http_parser *parser, const char *at, size_t length) {
   http_request_t *request = parser->data;
   zval *data = request->request;
 
-  add_assoc_stringl(data, "url", at, length, 1);
+  add_assoc_stringl(data, "url", (char*)at, length, 1);
 
   return 0;
 }
@@ -210,7 +209,7 @@ int _http_on_header_field(http_parser *parser, const char *at, size_t length) {
 int _http_on_header_value(http_parser *parser, const char *at, size_t length) {
   http_request_t *request = parser->data;
 
-  add_assoc_stringl(request->headers, request->header, at, length, 1);
+  add_assoc_stringl(request->headers, request->header, (char*)at, length, 1);
 
   efree(request->header);
   return 0;
@@ -229,7 +228,7 @@ int _http_on_body(http_parser *parser, const char *at, size_t length) {
   http_request_t *request = parser->data;
   zval *data = request->request;
 
-  add_assoc_stringl(data, "body", at, length, 1);
+  add_assoc_stringl(data, "body", (char*)at, length, 1);
 
   return 0;
 }

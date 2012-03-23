@@ -16,18 +16,20 @@ Evented I/O for PHP
     ?>
 
 ### To build:
-(I apologize for such the manual build process, this will be simplified)
-You have to first manually build everything in deps/
+This will get simpler as time goes on
 
     git submodule init
     git submodule update
-    make -C deps/http-parser libhttp_parser.o
-    make -C deps/libuv
-    
-Then you must build the PHP module.
-
-    cd src/
-    phpize
-    ./configure
     make
-    make install
+    sudo make install
+    
+Then you must add the following line to your php.ini
+
+    extension=nodephp.so
+
+Now you can go and run the example script
+
+    php src/test.php
+
+Now if you point your browser to [127.0.0.1:8080](http://127.0.0.1:8080) you 
+should see the response being served by the test script via nodephp
