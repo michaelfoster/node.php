@@ -77,33 +77,31 @@ zend_object_value http_new(zend_class_entry *class_type TSRMLS_DC) {
 
 void http_wrap_free(void *object TSRMLS_DC) {
   http_wrap_t *http = (http_wrap_t*) object;
-  zend_object_std_dtor(&http->obj TSRMLS_CC);
-  efree(http);
+  zend_objects_free_object_storage(&http->obj TSRMLS_CC);
 }
 
 zend_object_value http_response_new(zend_class_entry *class_type TSRMLS_DC) {
   zend_object_value instance;
-  http_response_t *wrap = emalloc(sizeof(http_response_t));
+  http_response_t *response = emalloc(sizeof(http_response_t));
 
-  zend_object_std_init(&wrap->obj, class_type TSRMLS_CC);
-  init_properties(&wrap->obj, class_type);
+  zend_object_std_init(&response->obj, class_type TSRMLS_CC);
+  init_properties(&response->obj, class_type);
 
-  TSRMLS_SET(wrap);
-
-  instance.handle = zend_objects_store_put((void*) wrap,
+  instance.handle = zend_objects_store_put((void*) response,
                                            (zend_objects_store_dtor_t) zend_objects_destroy_object,
                                            http_response_free,
                                            NULL
                                            TSRMLS_CC);
   instance.handlers = zend_get_std_object_handlers();
 
+  response->handle = instance.handle;
+
   return instance;
 }
 
 void http_response_free(void *object TSRMLS_DC) {
   http_response_t *response = (http_response_t*) object;
-  zend_object_std_dtor(&response->obj TSRMLS_CC);
-  efree(response);
+  zend_objects_free_object_storage(&response->obj TSRMLS_CC);
 }
 
 // libuv callbacks
@@ -143,8 +141,6 @@ void _on_http_connection(uv_stream_t* server_handle, int status) {
 
 void _http_on_close(uv_handle_t *client) {
   http_request_t *request = client->data;
-  FREE_ZVAL(request->request);
-  FREE_ZVAL(request->headers);
   efree(request);
 }
 
@@ -164,7 +160,6 @@ void _http_on_read(uv_stream_t *client, ssize_t nread, uv_buf_t buf) {
 
     if (s < nread) {
       uv_close((uv_handle_t*) client, _http_on_close);
-      // TODO: notify the user of a parse error?
     } 
   } else {
     uv_err_t error = uv_last_error(uv_default_loop());
@@ -252,14 +247,16 @@ int _http_on_message_complete(http_parser *parser) {
     node_function_call_zval(cb, 2, &data, &r_zval);
 
     zend_objects_store_del_ref_by_handle_ex(object.handle, object.handlers);
-    uv_close((uv_handle_t*) &request->handle, _http_on_close);    
   }
 
   return 0;
 }
 
 void _after_http_write(uv_write_t *request, int status) {
-  // nothing to do here yet
+  http_response_t *self = (http_response_t*) request->data;
+  efree(self->response);
+  zend_objects_store_del_ref_by_handle(self->handle);
+  uv_close((uv_handle_t*) request->handle, _http_on_close);
 }
 
 // class methods
@@ -324,37 +321,38 @@ PHP_METHOD(node_http, listen) {
 }
 
 PHP_METHOD(node_http_response, end) {
-  http_response_t *self;
   zval *arg1;
+  zend_object *self;
+  http_response_t *response;
   char *http_res = "HTTP/1.1 200 OK\r\n"
                    "Content-Type: text/plain\r\n"
                    "Content-Length: %d\r\n"
                    "\r\n%s";
+  int result = zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "z", &arg1);
 
-  if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "z", &arg1) == FAILURE) {
-    return;
+  if (result == FAILURE || Z_TYPE_P(arg1) != IS_STRING) {
+    RETURN_BOOL(0);
   }
 
-  if (Z_TYPE_P(arg1) != IS_STRING) {
-    return;
-  }
+  self = zend_object_store_get_object(getThis() TSRMLS_CC);
+  response = (http_response_t*) self;
+  zend_objects_store_add_ref_by_handle(response->handle);
 
-  self = (http_response_t*) zend_object_store_get_object(getThis() TSRMLS_CC);
-
-  self->response = emalloc(strlen(http_res) + 20 + Z_STRLEN_P(arg1));
-
-  sprintf(self->response, http_res, Z_STRLEN_P(arg1), Z_STRVAL_P(arg1));
+  response->response = emalloc(strlen(http_res) + 20 + Z_STRLEN_P(arg1));
+  sprintf(response->response, http_res, Z_STRLEN_P(arg1), Z_STRVAL_P(arg1));
 
   uv_buf_t buf;
-  buf.base = self->response;
-  buf.len = strlen(self->response);
+  buf.base = response->response;
+  buf.len = strlen(response->response);
 
-  uv_write( &self->request
-          , (uv_stream_t*)self->socket
+  response->request.data = response;
+
+  uv_write( &response->request
+          , (uv_stream_t*)response->socket
           , &buf
           , 1
           , _after_http_write
           );
 
-  RETURN_NULL();
+  RETURN_BOOL(1);
 }

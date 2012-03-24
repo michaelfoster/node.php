@@ -29,6 +29,7 @@ struct _http_request_t {
 struct  _http_response_t {
   zend_object obj;
   uv_write_t request;
+  zend_object_handle handle;
   uv_tcp_t *socket;
   char *response;
   zval *callback;

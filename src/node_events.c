@@ -10,6 +10,8 @@
 int _node_event_emitter_on(zend_object *self, zval *event, zval *handler);
 int _node_event_emitter_once(zend_object *self, zval *event, zval *handler);
 int _node_event_emitter_add_to_array(zval *ht, zval *event, zval *handler);
+int _node_event_emitter_on(zend_object *self, zval *event, zval *handler);
+int _node_event_emitter_emit(zend_object *self, zval *event, zval *data);
 
 // register methods for the event_emitter object
 zend_function_entry event_emitter_methods[] = {
@@ -49,7 +51,10 @@ zend_object_value event_emitter_new(zend_class_entry *class_type TSRMLS_DC) {
 }
 
 void event_emitter_free(void *object TSRMLS_DC) {
-  
+  event_emitter_t *emitter = (event_emitter_t*) object;
+  zend_objects_free_object_storage(&emitter->obj TSRMLS_CC);
+  FREE_ZVAL(emitter->listeners);
+  FREE_ZVAL(emitter->once);
 }
 
 // private methods
@@ -71,6 +76,10 @@ int _node_event_emitter_once(zend_object *self, zval *event, zval *handler) {
                                          );
 }
 
+int _node_event_emitter_emit(zend_object *self, zval *event, zval *data) {
+    return 0;
+}
+
 int _node_event_emitter_add_to_array(zval *ht, zval *event, zval *handler) {
   zval *listeners;
   int index_exists;
@@ -86,12 +95,13 @@ int _node_event_emitter_add_to_array(zval *ht, zval *event, zval *handler) {
   }
 
   // lets find the index for the set of callbacks
-  index_exists = zend_hash_find( ht->value.ht
+  index_exists = zend_hash_find( Z_ARRVAL_P(ht)
                                , Z_STRVAL_P(event)
                                , Z_STRLEN_P(event)
                                , (void**)&listeners
                                );
   
+  // if the set of callbacks was not found, lets create one
   if (index_exists == FAILURE) {
     ALLOC_INIT_ZVAL(listeners);
     array_init(listeners);
@@ -99,6 +109,7 @@ int _node_event_emitter_add_to_array(zval *ht, zval *event, zval *handler) {
   }
 
   // array_push(&listners, handler)
+  Z_ADDREF_P(handler);
   add_next_index_zval(listeners, handler);
 
   return 1;
@@ -157,12 +168,20 @@ PHP_METHOD(node_event_emitter, listeners) {
 }
 
 PHP_METHOD(node_event_emitter, emit) {
-  /*
+    /*
   zend_object *self = zend_object_store_get_object(getThis() TSRMLS_CC);
   int argc = ZEND_NUM_ARGS();
   zval *event, *data;
   int result = zend_parse_parameters(argc TSRMLS_CC, "z|z", &event, &data);
-  */
-  RETURN_NULL();
+
+  switch(ZEND_NUM_ARGS()) {
+  case 0: RETURN_BOOL(0);
+  case 1:
+    
+    break;
+  case 2:  RETURN_BOOL(_node_event_emitter_emit());
+  default: RETURN_BOOL(0);
+  }
+    */
 }
 
