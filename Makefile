@@ -26,7 +26,7 @@ LDFLAGS = -bundle -flat_namespace -undefined suppress
 
 INCLUDES = -I$(UVDIR)/include             \
            -I$(HTTPDIR)                   \
-           $(shell /usr/local/bin/php-config --includes)
+           $(shell php-config --includes)
 
 OBJ = $(BUILDDIR)/node_events.o           \
       $(BUILDDIR)/node_function.o         \
