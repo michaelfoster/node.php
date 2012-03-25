@@ -24,7 +24,7 @@ int _http_on_header_value(http_parser *parser, const char *at, size_t length);
 int _http_on_headers_complete(http_parser *parser);
 int _http_on_body(http_parser *parser, const char *at, size_t length);
 int _http_on_message_complete(http_parser *parser);
-void _after_http_write(uv_write_t *request, int status);
+void _after_http_response_end(uv_write_t *request, int status);
 
 // set the callbacks for the http parser
  http_parser_settings _http_parser_settings = {
@@ -252,11 +252,12 @@ int _http_on_message_complete(http_parser *parser) {
   return 0;
 }
 
-void _after_http_write(uv_write_t *request, int status) {
+void _after_http_response_end(uv_write_t *request, int status) {
   http_response_t *self = (http_response_t*) request->data;
+  uv_stream_t *handle = request->handle;
   efree(self->response);
   zend_objects_store_del_ref_by_handle(self->handle);
-  uv_close((uv_handle_t*) request->handle, _http_on_close);
+  uv_close((uv_handle_t*) handle, _http_on_close);
 }
 
 // class methods
@@ -351,7 +352,7 @@ PHP_METHOD(node_http_response, end) {
           , (uv_stream_t*)response->socket
           , &buf
           , 1
-          , _after_http_write
+          , _after_http_response_end
           );
 
   RETURN_BOOL(1);
