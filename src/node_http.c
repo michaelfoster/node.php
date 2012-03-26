@@ -138,8 +138,8 @@ void _on_http_connection(uv_stream_t* server_handle, int status) {
 void _http_on_close(uv_handle_t *client) {
   http_request_t *request = client->data;
   
-  zval_dtor(request->request);
-  zval_dtor(request->headers);
+  zval_ptr_dtor(&request->request);
+  zval_ptr_dtor(&request->headers);
 
   efree(request);
 }
@@ -217,7 +217,6 @@ int _http_on_headers_complete(http_parser *parser) {
   zval *data = request->request;
 
   add_assoc_zval(data, "headers", request->headers);
-  //Z_DELREF_P(request->headers);
 
   return 0;
 }
@@ -249,12 +248,9 @@ int _http_on_message_complete(http_parser *parser) {
     response->socket = &request->handle;
 
     result = node_function_call_zval(cb, 2, &data, &r_zval);
-    // free the result of the closure imediately
-    FREE_ZVAL(result);
-    // free the response object if it's not longer referenced
-    if (Z_DELREF_P(r_zval) == 0) {
-        FREE_ZVAL(r_zval);
-    }
+
+    zval_ptr_dtor(&result);
+    zval_ptr_dtor(&r_zval);
 
     zend_objects_store_del_ref_by_handle_ex(object.handle, object.handlers);
   }
