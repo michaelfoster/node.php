@@ -37,7 +37,7 @@ DEPS = $(UVDIR)/uv.a                      \
        $(HTTPDIR)/libhttp_parser.o        
 
 $(BUILDDIR)/nodephp.so: $(DEPS) $(OBJ)
-	$(CC) $(LDFLAGS) -o $@ $^
+	$(CC) $(CFLAGS_FAST) $(LDFLAGS) -o $@ $^
 
 $(UVDIR)/Makefile:
 	git submodule update --init $(UVDIR)

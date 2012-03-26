@@ -108,22 +108,18 @@ void http_response_free(void *object TSRMLS_DC) {
 
 void _on_http_connection(uv_stream_t* server_handle, int status) {
   http_wrap_t *self = (http_wrap_t*) server_handle->data;
-  http_request_t *client;
-  int r;
-
-  TSRMLS_D_GET(self);
 
   if (status != 0) {
-    // TODO: handle errors better
+    // TODO: emit error
     return;
   }
 
-  client = emalloc(sizeof(http_request_t));
+  http_request_t *client = emalloc(sizeof(http_request_t));
   uv_tcp_init(uv_default_loop(), &client->handle);
 
-  r = uv_accept(server_handle, (uv_stream_t*) &client->handle);
+  int r = uv_accept(server_handle, (uv_stream_t*) &client->handle);
   if (r != 0) {
-    // TODO: handle errors better
+    // TODO: emit error
     return;
   }
 
@@ -141,6 +137,10 @@ void _on_http_connection(uv_stream_t* server_handle, int status) {
 
 void _http_on_close(uv_handle_t *client) {
   http_request_t *request = client->data;
+  
+  zval_dtor(request->request);
+  zval_dtor(request->headers);
+
   efree(request);
 }
 
@@ -166,7 +166,7 @@ void _http_on_read(uv_stream_t *client, ssize_t nread, uv_buf_t buf) {
     if (error.code == UV_EOF) {
       uv_close((uv_handle_t*)client, _http_on_close);
     } else {
-      // TODO: notify the user of IO error?
+      // TODO: emit error
     }
   }
   efree(buf.base);
@@ -180,6 +180,8 @@ int _http_on_message_begin(http_parser *parser) {
   ALLOC_INIT_ZVAL(request->headers);
   array_init(request->request);
   array_init(request->headers);
+  Z_ADDREF_P(request->request);
+  Z_ADDREF_P(request->headers);
 
   return 0;
 }
@@ -205,8 +207,8 @@ int _http_on_header_value(http_parser *parser, const char *at, size_t length) {
   http_request_t *request = parser->data;
 
   add_assoc_stringl(request->headers, request->header, (char*)at, length, 1);
-
   efree(request->header);
+
   return 0;
 }
 
@@ -215,6 +217,7 @@ int _http_on_headers_complete(http_parser *parser) {
   zval *data = request->request;
 
   add_assoc_zval(data, "headers", request->headers);
+  //Z_DELREF_P(request->headers);
 
   return 0;
 }
@@ -232,19 +235,26 @@ int _http_on_message_complete(http_parser *parser) {
   http_request_t *request = parser->data;
   zval *cb = request->parent->connection_cb;
   zval *data = request->request;
-  zval *r_zval;
-  http_response_t *response;
 
   // call the request callback
   if (cb) {
+    zval *r_zval, *result;
     MAKE_STD_ZVAL(r_zval);
     Z_TYPE_P(r_zval) = IS_OBJECT;
     zend_object_value object = http_response_new(http_server_response_ce TSRMLS_CC);
     Z_OBJVAL_P(r_zval) = object;
-    response = (http_response_t*) zend_object_store_get_object(r_zval TSRMLS_CC);
+    http_response_t *response = (http_response_t*) zend_object_store_get_object_by_handle(
+      object.handle TSRMLS_CC
+    );
     response->socket = &request->handle;
 
-    node_function_call_zval(cb, 2, &data, &r_zval);
+    result = node_function_call_zval(cb, 2, &data, &r_zval);
+    // free the result of the closure imediately
+    FREE_ZVAL(result);
+    // free the response object if it's not longer referenced
+    if (Z_DELREF_P(r_zval) == 0) {
+        FREE_ZVAL(r_zval);
+    }
 
     zend_objects_store_del_ref_by_handle_ex(object.handle, object.handlers);
   }
