@@ -112,7 +112,7 @@ zend_object_value http_response_new(zend_class_entry *class_type TSRMLS_DC) {
 
 void http_response_free(void *object TSRMLS_DC) {
   http_response_t *response = (http_response_t*) object;
-  zval_ptr_dtor(response->headers);
+  zval_ptr_dtor(&response->headers);
   zend_objects_free_object_storage(&response->obj TSRMLS_CC);
 }
 
@@ -361,14 +361,14 @@ PHP_METHOD(node_http_response, setStatus) {
 }
 
 PHP_METHOD(node_http_response, setHeader) {
-  zend_object *self = zend_object_store_get_object(getThis(), TSRMLS_CC);
-  http_response_t *response = (http_response_t*) self;
+  zend_object *self = zend_object_store_get_object(getThis() TSRMLS_CC);
+  //http_response_t *response = (http_response_t*) self;
   zval *key, *value;
-  int result = zend_parser_parameters( ZEND_NUM_ARGS() TSRMLS_CC
-                                     , "zz"
-                                     , &key
-                                     , &value
-                                     );
+  int result = zend_parse_parameters( ZEND_NUM_ARGS() TSRMLS_CC
+                                    , "zz"
+                                    , &key
+                                    , &value
+                                    );
 
   if (result == FAILURE) {
     RETURN_BOOL(0);
