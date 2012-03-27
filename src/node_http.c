@@ -45,7 +45,15 @@ zend_function_entry http_server_methods[] = {
 
 // register methods for the node_http_resonse class
 zend_function_entry http_server_response_methods[] = {
-  PHP_ME(node_http_response, end, NULL, ZEND_ACC_PUBLIC)
+  PHP_ME(node_http_response, writeContinue, NULL, ZEND_ACC_PUBLIC)
+  PHP_ME(node_http_response, writeHead,     NULL, ZEND_ACC_PUBLIC)
+  PHP_ME(node_http_response, setStatus,     NULL, ZEND_ACC_PUBLIC)
+  PHP_ME(node_http_response, setHeader,     NULL, ZEND_ACC_PUBLIC)
+  PHP_ME(node_http_response, getHeader,     NULL, ZEND_ACC_PUBLIC)
+  PHP_ME(node_http_response, removeHeader,  NULL, ZEND_ACC_PUBLIC)
+  PHP_ME(node_http_response, addTrailers,   NULL, ZEND_ACC_PUBLIC)
+  PHP_ME(node_http_response, write,         NULL, ZEND_ACC_PUBLIC)
+  PHP_ME(node_http_response, end,           NULL, ZEND_ACC_PUBLIC)
   NODEPHP_END_FUNCTIONS
 };
 
@@ -84,6 +92,9 @@ zend_object_value http_response_new(zend_class_entry *class_type TSRMLS_DC) {
   zend_object_value instance;
   http_response_t *response = emalloc(sizeof(http_response_t));
 
+  ALLOC_INIT_ZVAL(response->headers);
+  array_init(response->headers);
+
   zend_object_std_init(&response->obj, class_type TSRMLS_CC);
   init_properties(&response->obj, class_type);
 
@@ -101,6 +112,7 @@ zend_object_value http_response_new(zend_class_entry *class_type TSRMLS_DC) {
 
 void http_response_free(void *object TSRMLS_DC) {
   http_response_t *response = (http_response_t*) object;
+  zval_ptr_dtor(response->headers);
   zend_objects_free_object_storage(&response->obj TSRMLS_CC);
 }
 
@@ -189,8 +201,10 @@ int _http_on_message_begin(http_parser *parser) {
 int _http_on_url(http_parser *parser, const char *at, size_t length) {
   http_request_t *request = parser->data;
   zval *data = request->request;
+  char *method = (char *) http_method_str(parser->method);
 
   add_assoc_stringl(data, "url", (char*)at, length, 1);
+  add_assoc_stringl(data, "method", method, length, 1);
 
   return 0;
 }
@@ -217,6 +231,7 @@ int _http_on_headers_complete(http_parser *parser) {
   zval *data = request->request;
 
   add_assoc_zval(data, "headers", request->headers);
+  Z_DELREF_P(request->headers);
 
   return 0;
 }
@@ -324,6 +339,104 @@ PHP_METHOD(node_http, listen) {
     Z_ADDREF_P(callback);
   }
 
+  RETURN_NULL();
+}
+
+PHP_METHOD(node_http_response, writeContinue) {
+  // TODO: implement
+  // NOTE: takes no args
+  RETURN_NULL();
+}
+
+PHP_METHOD(node_http_response, writeHead) {
+  // TODO: implement
+  // NOTE: takes status code, optional reason and optional headers
+  RETURN_NULL();
+}
+
+PHP_METHOD(node_http_response, setStatus) {
+  // TODO: implement
+  // NOTE: takes status code
+  RETURN_NULL();
+}
+
+PHP_METHOD(node_http_response, setHeader) {
+  zend_object *self = zend_object_store_get_object(getThis(), TSRMLS_CC);
+  http_response_t *response = (http_response_t*) self;
+  zval *key, *value;
+  int result = zend_parser_parameters( ZEND_NUM_ARGS() TSRMLS_CC
+                                     , "zz"
+                                     , &key
+                                     , &value
+                                     );
+
+  if (result == FAILURE) {
+    RETURN_BOOL(0);
+  }
+
+  if (Z_TYPE_P(key) != IS_STRING || Z_TYPE_P(value) != IS_STRING) {
+    RETURN_BOOL(0);
+  }
+
+  // TODO: finish implementing setting/updating headers
+
+  RETURN_NULL();
+}
+
+PHP_METHOD(node_http_response, getHeader) {
+  zend_object *self = zend_object_store_get_object(getThis() TSRMLS_CC);
+  http_response_t *response = (http_response_t*) self;
+  zval *header, *value;
+  int result = zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "z", &header);
+
+  if (result == FAILURE || Z_TYPE_P(header) != IS_STRING) {
+    RETURN_BOOL(0);
+  }
+
+  result = zend_hash_find( Z_ARRVAL_P(response->headers)
+                           , Z_STRVAL_P(header)
+                           , Z_STRLEN_P(header)
+                           , (void**)&value
+                           );
+
+  if (result == SUCCESS) {
+    RETURN_STRING(Z_STRVAL_P(value), 1);
+  } else {
+    RETURN_BOOL(0);
+  }
+}
+
+PHP_METHOD(node_http_response, removeHeader) {
+  zend_object *self = zend_object_store_get_object(getThis() TSRMLS_CC);
+  http_response_t *response = (http_response_t*) self;
+  zval *header;
+  int result = zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "z", &header);
+
+  if (result == FAILURE || Z_TYPE_P(header) != IS_STRING) {
+    RETURN_BOOL(0);
+  }
+
+  result = zend_hash_del( Z_ARRVAL_P(response->headers)
+                        , Z_STRVAL_P(header)
+                        , Z_STRLEN_P(header)
+                        );
+
+  if (result == SUCCESS) {
+    RETURN_BOOL(1);
+  } else {
+    RETURN_BOOL(0);
+  }
+}
+
+PHP_METHOD(node_http_response, addTrailers) {
+  // TODO: implement
+  // NOTE: takes headers as an array
+  RETURN_NULL();
+}
+
+PHP_METHOD(node_http_response, write) {
+  // TODO: implement
+  // NOTE: takes body as a string
   RETURN_NULL();
 }
 

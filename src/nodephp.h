@@ -1,6 +1,10 @@
 #ifndef nodephp_node_h
 #define nodephp_node_h
 
+typedef unsigned long int ulong;
+typedef unsigned short int ushort;
+typedef unsigned int uint;
+
 // php deps
 #include "php.h"
 #include "php_ini.h"

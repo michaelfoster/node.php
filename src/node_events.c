@@ -53,8 +53,8 @@ zend_object_value event_emitter_new(zend_class_entry *class_type TSRMLS_DC) {
 void event_emitter_free(void *object TSRMLS_DC) {
   event_emitter_t *emitter = (event_emitter_t*) object;
   zend_objects_free_object_storage(&emitter->obj TSRMLS_CC);
-  FREE_ZVAL(emitter->listeners);
-  FREE_ZVAL(emitter->once);
+  zval_ptr_dtor(emitter->listeners);
+  zval_ptr_dtor(emitter->once);
 }
 
 // private methods
