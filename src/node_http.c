@@ -94,6 +94,8 @@ zend_object_value http_response_new(zend_class_entry *class_type TSRMLS_DC) {
 
   ALLOC_INIT_ZVAL(response->headers);
   array_init(response->headers);
+  response->headers_sent = 0;
+  response->status = NULL;
 
   zend_object_std_init(&response->obj, class_type TSRMLS_CC);
   init_properties(&response->obj, class_type);
@@ -349,28 +351,49 @@ PHP_METHOD(node_http_response, writeContinue) {
 }
 
 PHP_METHOD(node_http_response, writeHead) {
-  // TODO: implement
-  // NOTE: takes status code, optional reason and optional headers
-  RETURN_NULL();
+  zend_object *self = zend_object_store_get_object(getThis() TSRMLS_CC);
+  http_response_t *response = (http_response_t*) self;
+
+  if (response->headers_sent) {
+    RETURN_BOOL(0);
+  }
+
+  // TODO: implement the actual writing of the headers
+
+  RETURN_BOOL(1);
 }
 
 PHP_METHOD(node_http_response, setStatus) {
-  // TODO: implement
-  // NOTE: takes status code
-  RETURN_NULL();
+  zend_object *self = zend_object_store_get_object(getThis() TSRMLS_CC);
+  http_response_t *response = (http_response_t*) self;
+  zval *status;
+  int result = zend_parse_parameters( ZEND_NUM_ARGS() TSRMLS_CC
+                                    , "z"
+                                    , &status
+                                    );
+
+  if (response->headers_sent || result == FAILURE) {
+    RETURN_BOOL(0);
+  }
+
+  if (response->status != NULL) { zval_ptr_dtor(&response->status); }
+  zval_copy_ctor(status);
+  response->status = status;
+
+  RETURN_BOOL(1);
 }
 
 PHP_METHOD(node_http_response, setHeader) {
   zend_object *self = zend_object_store_get_object(getThis() TSRMLS_CC);
-  //http_response_t *response = (http_response_t*) self;
-  zval *key, *value;
+  http_response_t *response = (http_response_t*) self;
+  zval *key, *value, **destination;
   int result = zend_parse_parameters( ZEND_NUM_ARGS() TSRMLS_CC
                                     , "zz"
                                     , &key
                                     , &value
                                     );
 
-  if (result == FAILURE) {
+  if (response->headers_sent || result == FAILURE) {
     RETURN_BOOL(0);
   }
 
@@ -378,9 +401,15 @@ PHP_METHOD(node_http_response, setHeader) {
     RETURN_BOOL(0);
   }
 
-  // TODO: finish implementing setting/updating headers
+  result = zend_hash_update( Z_ARRVAL_P(response->headers)
+                           , Z_STRVAL_P(key)
+                           , Z_STRLEN_P(key)
+                           , Z_STRVAL_P(value)
+                           , Z_STRLEN_P(value)
+                           , (void**)destination
+                           );
 
-  RETURN_NULL();
+  RETURN_BOOL(result == SUCCESS);
 }
 
 PHP_METHOD(node_http_response, getHeader) {
@@ -412,6 +441,10 @@ PHP_METHOD(node_http_response, removeHeader) {
   zval *header;
   int result = zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "z", &header);
 
+  if (response->headers_sent) {
+    RETURN_BOOL(0);
+  }
+
   if (result == FAILURE || Z_TYPE_P(header) != IS_STRING) {
     RETURN_BOOL(0);
   }
@@ -421,11 +454,7 @@ PHP_METHOD(node_http_response, removeHeader) {
                         , Z_STRLEN_P(header)
                         );
 
-  if (result == SUCCESS) {
-    RETURN_BOOL(1);
-  } else {
-    RETURN_BOOL(0);
-  }
+  RETURN_BOOL(result == SUCCESS);
 }
 
 PHP_METHOD(node_http_response, addTrailers) {
@@ -457,6 +486,12 @@ PHP_METHOD(node_http_response, end) {
   self = zend_object_store_get_object(getThis() TSRMLS_CC);
   response = (http_response_t*) self;
   zend_objects_store_add_ref_by_handle(response->handle);
+
+  /* TODO:
+   *  + check if headers are already sent
+   *    + if not -> generate and send them with the message body
+   *    + else   -> generate a chunked encoded string and send it
+   */
 
   response->response = emalloc(strlen(http_res) + 20 + Z_STRLEN_P(arg1));
   sprintf(response->response, http_res, Z_STRLEN_P(arg1), Z_STRVAL_P(arg1));

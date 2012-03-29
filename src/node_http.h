@@ -32,6 +32,7 @@ struct  _http_response_t {
   zend_object_handle handle;
   uv_tcp_t *socket;
   zval *headers;
+  zval *status;
   unsigned int headers_sent : 1;
   char *response;
   zval *callback;
