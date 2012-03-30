@@ -111,6 +111,7 @@ zend_object_value http_response_new(zend_class_entry *class_type TSRMLS_DC) {
 
   ALLOC_INIT_ZVAL(response->headers);
   array_init(response->headers);
+  Z_ADDREF_P(response->headers);
   response->headers_sent = 0;
   response->status = NULL;
 
@@ -320,7 +321,6 @@ uv_buf_t _http_response_send_headers(http_response_t *self, int send) {
       zend_hash_get_current_data(ht, (void**) &data) == SUCCESS; 
       zend_hash_move_forward(ht)) { 
     zend_hash_get_current_key(ht, &key, &index, 0);
-    php_printf("%s: %s\n", key, Z_STRVAL_PP(data));
     strcat(buf.base, key);
     strcat(buf.base, ": ");
     strcat(buf.base, Z_STRVAL_PP(data));
@@ -339,19 +339,17 @@ uv_buf_t _http_response_send_headers(http_response_t *self, int send) {
 size_t _http_response_get_header_length(http_response_t *self) {
   size_t acc = 2;
   HashTable *ht = Z_ARRVAL_P(self->headers);
-  zval *data;
+  zval **data;
   char *key;
   ulong index;
 
-  php_printf("==scanning\n");
   for(zend_hash_internal_pointer_reset(ht); 
       zend_hash_get_current_data(ht, (void**) &data) == SUCCESS; 
       zend_hash_move_forward(ht)) { 
     zend_hash_get_current_key(ht, &key, &index, 0);
-    php_printf("%s: %s(%d)\n", key, Z_STRVAL_P(data), Z_STRLEN_P(data));
-    acc += Z_STRLEN_P(data) + strlen(key) + 4;
+    acc += Z_STRLEN_PP(data) + strlen(key) + 4;
   }
-  php_printf("alloc size: %zu\n", acc);
+
   return acc;
 }
 
@@ -408,24 +406,8 @@ void _http_response_set_default_header(http_response_t *self,
                              , key_len + 1
                              , (void**)&ret
                              );
-  php_printf("== setting\n");
   if (result == FAILURE) {
-    php_printf("default not found for: %s\n", key);
-    zval *new;
-    MAKE_STD_ZVAL(new);
-    ZVAL_STRING(new, val, 1);
-    zval_copy_ctor(new);
-    zend_hash_update( Z_ARRVAL_P(self->headers)
-                    , key
-                    , key_len + 1
-                    , new
-                    , sizeof(zval*)
-                    , NULL
-                    );
-    php_printf("setting %s: %s(%d)\n", key, Z_STRVAL_P(new), Z_STRLEN_P(new));
     add_assoc_stringl(self->headers, key, val, val_len, 1);
-  } else {
-    php_printf("default found for %s: %s\n", key, Z_STRVAL_P(ret));
   }
 }
 
@@ -550,7 +532,7 @@ PHP_METHOD(node_http_response, setStatus) {
 PHP_METHOD(node_http_response, setHeader) {
   zend_object *self = zend_object_store_get_object(getThis() TSRMLS_CC);
   http_response_t *response = (http_response_t*) self;
-  zval *key, *value, *new;
+  zval *key, *value;
   int result = zend_parse_parameters( ZEND_NUM_ARGS() TSRMLS_CC
                                     , "zz"
                                     , &key
@@ -565,15 +547,13 @@ PHP_METHOD(node_http_response, setHeader) {
     RETURN_BOOL(0);
   }
 
-  MAKE_STD_ZVAL(new);
-  ZVAL_ZVAL(new, value, 1, 0);
-  zend_hash_update( Z_ARRVAL_P(response->headers)
-                  , Z_STRVAL_P(key)
-                  , Z_STRLEN_P(key) + 1
-                  , new
-                  , sizeof(zval*)
-                  , NULL
-                  );
+  add_assoc_stringl( response->headers
+                   , Z_STRVAL_P(key)
+                   , Z_STRVAL_P(value)
+                   , Z_STRLEN_P(value)
+                   , 1
+                   );
+    
 
   RETURN_BOOL(1);
 }

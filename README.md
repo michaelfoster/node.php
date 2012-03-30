@@ -18,6 +18,8 @@ Evented I/O for PHP
 ### To build:
 First build nodephp as a php module
 
+    git clone git://github.com/JosephMoniz/node.php.git
+    cd node.php
     make
     sudo make install
     

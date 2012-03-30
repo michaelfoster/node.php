@@ -8,4 +8,3 @@ $http->listen(8080, function($request, $response) {
 });
 
 nodephp_run();
-echo "after loop\n";
