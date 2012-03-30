@@ -67,7 +67,7 @@ PHP_FUNCTION(nodephp_run)
   RETURN_NULL();
 }
 
-static function_entry nodephp_functions[] = {
+static zend_function_entry nodephp_functions[] = {
   PHP_FE(nodephp_run, NULL)
   NODEPHP_END_FUNCTIONS
 };

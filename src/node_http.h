@@ -34,6 +34,7 @@ struct  _http_response_t {
   zval *headers;
   zval *status;
   unsigned int headers_sent : 1;
+  unsigned int is_chunked : 1;
   char *response;
   zval *callback;
   zval *string;
