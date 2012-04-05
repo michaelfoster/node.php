@@ -369,7 +369,7 @@ void _http_response_default_headers(http_response_t *self) {
   // TODO: fix this hash lookup
   return;
 
-  zval *encodings;
+  zval **encodings;
   result = zend_hash_find( Z_ARRVAL_P(self->headers)
                          , "Transfer-Encoding"
                          , 17
@@ -386,12 +386,12 @@ void _http_response_default_headers(http_response_t *self) {
                         );
     self->is_chunked = 1;
   } else {
-    char *substr = strstr(Z_STRVAL_P(encodings), "chunked");
+    char *substr = strstr(Z_STRVAL_PP(encodings), "chunked");
     if (substr == NULL) {
-      substr = emalloc(Z_STRLEN_P(encodings) + 11);
-      sprintf(substr, "%s, \"chunked\"", Z_STRVAL_P(encodings));
-      efree(Z_STRVAL_P(encodings));
-      Z_STRVAL_P(encodings) = substr;
+      substr = emalloc(Z_STRLEN_PP(encodings) + 11);
+      sprintf(substr, "%s, \"chunked\"", Z_STRVAL_PP(encodings));
+      efree(Z_STRVAL_PP(encodings));
+      Z_STRVAL_PP(encodings) = substr;
       self->is_chunked = 1;
     }
   }
@@ -400,7 +400,7 @@ void _http_response_default_headers(http_response_t *self) {
 void _http_response_set_default_header(http_response_t *self, 
                                        char *key, size_t key_len, 
                                        char *val, size_t val_len) {
-  zval *ret;
+  zval **ret;
   int result = zend_hash_find( Z_ARRVAL_P(self->headers)
                              , key
                              , key_len + 1
@@ -561,7 +561,7 @@ PHP_METHOD(node_http_response, setHeader) {
 PHP_METHOD(node_http_response, getHeader) {
   zend_object *self = zend_object_store_get_object(getThis() TSRMLS_CC);
   http_response_t *response = (http_response_t*) self;
-  zval *header, *value;
+  zval *header, **value;
   int result = zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "z", &header);
 
   if (result == FAILURE || Z_TYPE_P(header) != IS_STRING) {
@@ -575,7 +575,7 @@ PHP_METHOD(node_http_response, getHeader) {
                          );
 
   if (result == SUCCESS) {
-    RETURN_STRING(Z_STRVAL_P(value), 1);
+    RETURN_STRING(Z_STRVAL_PP(value), 1);
   } else {
     RETURN_BOOL(0);
   }
