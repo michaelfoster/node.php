@@ -22,15 +22,16 @@ zval* node_function_call_zval(zval *func, int argc, ...) {
     fci.retval_ptr_ptr = &result;
     // gather the argument info
     va_start(argv, argc);
-    zend_fcall_info_argv(&fci, argc, argv);
+    zend_fcall_info_argv(&fci, argc, &argv);
     va_end(argv);
     // call the function
     zend_call_function(&fci, &fci_cache TSRMLS_CC);
-    return result;
   } else {
     ZVAL_BOOL(result, 0);
-    return result;
   }
+
+  zend_fcall_info_args_clear(&fci, 1);
+  return result;
 }
 
 zend_bool node_function_is_zval_callable(zval *func) {

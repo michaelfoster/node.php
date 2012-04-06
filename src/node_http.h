@@ -29,7 +29,12 @@ struct _http_request_t {
 struct  _http_response_t {
   zend_object obj;
   uv_write_t request;
+  zend_object_handle handle;
   uv_tcp_t *socket;
+  zval *headers;
+  zval *status;
+  unsigned int headers_sent : 1;
+  unsigned int is_chunked : 1;
   char *response;
   zval *callback;
   zval *string;
@@ -48,6 +53,14 @@ void http_response_free(void *object TSRMLS_DC);
 PHP_METHOD(node_http, listen);
 
 // node_http_response object methods
+PHP_METHOD(node_http_response, writeContinue);
+PHP_METHOD(node_http_response, writeHead);
+PHP_METHOD(node_http_response, setStatus);
+PHP_METHOD(node_http_response, setHeader);
+PHP_METHOD(node_http_response, getHeader);
+PHP_METHOD(node_http_response, removeHeader);
+PHP_METHOD(node_http_response, addTrailers);
+PHP_METHOD(node_http_response, write);
 PHP_METHOD(node_http_response, end);
 
 extern zend_function_entry http_server_methods[];

@@ -13,6 +13,7 @@
 
 #include "nodephp.h"
 #include "node_events.h"
+#include "node_function.h"
 #include "node_http.h"
 
 // php class entries
@@ -66,9 +67,9 @@ PHP_FUNCTION(nodephp_run)
   RETURN_NULL();
 }
 
-static function_entry nodephp_functions[] = {
+static zend_function_entry nodephp_functions[] = {
   PHP_FE(nodephp_run, NULL)
-  {NULL, NULL, NULL}
+  NODEPHP_END_FUNCTIONS
 };
 
 zend_module_entry nodephp_module_entry = {
