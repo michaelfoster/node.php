@@ -4,17 +4,15 @@
 #include "php.h"
 
 typedef struct _http_wrap_t http_wrap_t;
-typedef struct _http_request_t http_request_t;
+typedef struct _http_request_t http_request_t;                     
 typedef struct _http_response_t http_response_t;
+typedef struct _http_write_t http_write_t;
 
 struct _http_wrap_t {
   zend_object obj;
   uv_tcp_t handle;
   zval *close_cb;
   zval *connection_cb;
-#ifdef ZTS
-  TSRMLS_D;
-#endif
 };
 
 struct _http_request_t {
@@ -28,19 +26,20 @@ struct _http_request_t {
 
 struct  _http_response_t {
   zend_object obj;
-  uv_write_t request;
   zend_object_handle handle;
   uv_tcp_t *socket;
   zval *headers;
   zval *status;
   unsigned int headers_sent : 1;
   unsigned int is_chunked : 1;
-  char *response;
   zval *callback;
   zval *string;
-#ifdef ZTS
-  TSRMLS_D;
-#endif
+};
+
+struct _http_write_t {
+  uv_write_t request;
+  uv_buf_t buf;
+  char data[1];
 };
 
 // object ctors and dtors
@@ -56,6 +55,7 @@ PHP_METHOD(node_http, listen);
 PHP_METHOD(node_http_response, writeContinue);
 PHP_METHOD(node_http_response, writeHead);
 PHP_METHOD(node_http_response, setStatus);
+PHP_METHOD(node_http_response, getStatus);
 PHP_METHOD(node_http_response, setHeader);
 PHP_METHOD(node_http_response, getHeader);
 PHP_METHOD(node_http_response, removeHeader);

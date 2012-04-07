@@ -3,6 +3,7 @@
 $http = new node_http();
 
 $http->listen(8080, function($request, $response) {
+    $response->setStatus(200);
     $response->setHeader("Content-Type", "text/plain");
     $response->end("yay, super awesome response");
 });

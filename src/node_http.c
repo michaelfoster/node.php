@@ -14,8 +14,10 @@
 
 // auxilary node_http_response methods
 uv_buf_t _http_response_send_headers(http_response_t *self, int send);
+int _http_response_set_status_string(char *buf, zval *status);
 size_t _http_response_get_header_length(http_response_t *self);
 void _http_response_default_headers(http_response_t *self);
+void _http_response_default_status(http_response_t *self);
 void _http_response_set_default_header(http_response_t *self, 
                                        char *key, size_t key_len, 
                                        char *val, size_t val_len);
@@ -29,6 +31,7 @@ void _on_http_connection(uv_stream_t* server_handle, int status);
 uv_buf_t _http_on_alloc(uv_handle_t *client, size_t suggested_size);
 void _http_on_read(uv_stream_t *client, ssize_t nread, uv_buf_t buf);
 void _http_on_close(uv_handle_t *client);
+void _after_http_response_send_headers(uv_write_t *writer, int status);
 void _after_http_response_end(uv_write_t *request, int status);
 
 // http parser callbacks
@@ -40,7 +43,6 @@ int _http_on_headers_complete(http_parser *parser);
 int _http_on_body(http_parser *parser, const char *at, size_t length);
 int _http_on_message_complete(http_parser *parser);
 
-static char HTTP_OK[] = "HTTP/1.1 %s OK\r\n";
 static size_t HTTP_OK_LEN = 17;
 
 // set the callbacks for the http parser
@@ -65,6 +67,7 @@ zend_function_entry http_server_response_methods[] = {
   PHP_ME(node_http_response, writeContinue, NULL, ZEND_ACC_PUBLIC)
   PHP_ME(node_http_response, writeHead,     NULL, ZEND_ACC_PUBLIC)
   PHP_ME(node_http_response, setStatus,     NULL, ZEND_ACC_PUBLIC)
+  PHP_ME(node_http_response, getStatus,     NULL, ZEND_ACC_PUBLIC)  
   PHP_ME(node_http_response, setHeader,     NULL, ZEND_ACC_PUBLIC)
   PHP_ME(node_http_response, getHeader,     NULL, ZEND_ACC_PUBLIC)
   PHP_ME(node_http_response, removeHeader,  NULL, ZEND_ACC_PUBLIC)
@@ -294,46 +297,78 @@ int _http_on_message_complete(http_parser *parser) {
 }
 
 void _after_http_response_end(uv_write_t *request, int status) {
-  http_response_t *self = (http_response_t*) request->data;
+  http_write_t *writer = (http_write_t*) request;
+  zend_object_handle *obj_ref = (zend_object_handle*) request->data;
   uv_stream_t *handle = request->handle;
-  efree(self->response);
-  zend_objects_store_del_ref_by_handle(self->handle);
+
+  zend_objects_store_del_ref_by_handle(*obj_ref);
+  efree(writer);
+
   uv_close((uv_handle_t*) handle, _http_on_close);
 }
 
 // node_http_response auxilary methods
 
 uv_buf_t _http_response_send_headers(http_response_t *self, int send) {
-  //  size_t offset = HTTP_OK_LEN;
   HashTable *ht = Z_ARRVAL_P(self->headers);
   zval **data;
   char *key;
-  //  uint key_len;
   ulong index;
-  uv_buf_t buf;
+  uv_buf_t *buf;
+  http_write_t *writer;
 
   _http_response_default_headers(self);
 
-  buf.len = _http_response_get_header_length(self) + HTTP_OK_LEN;
-  buf.base = emalloc(buf.len);
-  sprintf(buf.base, HTTP_OK, Z_STRVAL_P(self->status));
+  int header_len = _http_response_get_header_length(self) + HTTP_OK_LEN;
+
+  if (send) {
+    writer = emalloc(sizeof(http_write_t) + header_len);
+    buf = &writer->buf;
+    buf->base = writer->data;
+  } else {
+    uv_buf_t tmp_buf;
+    buf = &tmp_buf;
+    tmp_buf.base = emalloc(header_len);
+  }
+  
+  buf->len = header_len;
+
+  _http_response_set_status_string(buf->base, self->status);
+
   for(zend_hash_internal_pointer_reset(ht); 
       zend_hash_get_current_data(ht, (void**) &data) == SUCCESS; 
       zend_hash_move_forward(ht)) { 
     zend_hash_get_current_key(ht, &key, &index, 0);
-    strcat(buf.base, key);
-    strcat(buf.base, ": ");
-    strcat(buf.base, Z_STRVAL_PP(data));
-    strcat(buf.base, "\r\n");
+    strcat(buf->base, key);
+    strcat(buf->base, ": ");
+    strcat(buf->base, Z_STRVAL_PP(data));
+    strcat(buf->base, "\r\n");
   }
 
-  strcat(buf.base, "\r\n");
+  strcat(buf->base, "\r\n");
 
-  if (!send) { return buf; }
+  if (!send) { return *buf; }
 
-  // TODO: write headers to socket when send == 1
-  buf.len = 0;
-  return buf;
+  uv_write( &writer->request
+          , (uv_stream_t*)self->socket
+          , buf
+          , 1
+          , _after_http_response_send_headers
+          );
+
+  return *buf;
+}
+
+void _after_http_response_send_headers(uv_write_t *writer, int status) {
+  efree(writer);
+}
+
+int _http_response_set_status_string(char *buf, zval *status) {
+  switch(Z_TYPE_P(status)) {
+  case IS_STRING: return sprintf(buf, "HTTP/1.1 %s OK\r\n", Z_STRVAL_P(status));
+  case IS_LONG:   return sprintf(buf, "HTTP/1.1 %ld OK\r\n", Z_LVAL_P(status));
+  default:        return sprintf(buf, "HTTP/1.1 200 OK\r\n");
+  }
 }
 
 size_t _http_response_get_header_length(http_response_t *self) {
@@ -353,11 +388,16 @@ size_t _http_response_get_header_length(http_response_t *self) {
   return acc;
 }
 
-void _http_response_default_headers(http_response_t *self) {
+void _http_response_default_status(http_response_t *self) {
   if (self->status == NULL) {
     MAKE_STD_ZVAL(self->status);
-    ZVAL_STRING(self->status, "200", 1);
+    ZVAL_LONG(self->status, 200);
   }
+}
+
+void _http_response_default_headers(http_response_t *self) {
+
+  _http_response_default_status(self);
 
   _http_response_set_default_header(self, "Content-Type", 12, "text/html", 9); 
 
@@ -522,11 +562,36 @@ PHP_METHOD(node_http_response, setStatus) {
     RETURN_BOOL(0);
   }
 
+  switch(Z_TYPE_P(status)) {
+  case IS_LONG: 
+    if (Z_LVAL_P(status) < 0 || Z_LVAL_P(status) > 999) { 
+      RETURN_BOOL(0); 
+    }
+    break;
+  case IS_STRING:
+    if (Z_STRLEN_P(status) > 3) {
+      RETURN_BOOL(0);
+    }
+    break;
+  default: RETURN_BOOL(0);
+  }
+
   if (response->status != NULL) { zval_ptr_dtor(&response->status); }
-  zval_copy_ctor(status);
-  response->status = status;
+
+  ALLOC_INIT_ZVAL(response->status);
+  response->status[0] = status[0];
+  zval_copy_ctor(response->status);
 
   RETURN_BOOL(1);
+}
+
+PHP_METHOD(node_http_response, getStatus) {
+  zend_object *self = zend_object_store_get_object(getThis() TSRMLS_CC);
+  http_response_t *response = (http_response_t*) self;
+
+  _http_response_default_status(response);
+
+  RETURN_ZVAL(response->status, 1, 0);
 }
 
 PHP_METHOD(node_http_response, setHeader) {
@@ -553,7 +618,6 @@ PHP_METHOD(node_http_response, setHeader) {
                    , Z_STRLEN_P(value)
                    , 1
                    );
-    
 
   RETURN_BOOL(1);
 }
@@ -619,8 +683,6 @@ PHP_METHOD(node_http_response, end) {
   zval *body;
   zend_object *self;
   http_response_t *response;
-  uv_buf_t bufs[2];
-  int buf_len = 0;
   int result = zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "z", &body);
 
   if (result == FAILURE || Z_TYPE_P(body) != IS_STRING) {
@@ -645,20 +707,20 @@ PHP_METHOD(node_http_response, end) {
 
   zval_ptr_dtor(&length);
 
-  bufs[0] = _http_response_send_headers_if_not_sent(response, 0);
-  if (bufs[0].len) { buf_len++; }
+  _http_response_send_headers_if_not_sent(response, 1);
 
-  response->response = emalloc(Z_STRLEN_P(body) + 2);
-  sprintf(response->response, "%s", Z_STRVAL_P(body));
+  http_write_t *writer = emalloc(sizeof(http_write_t) + Z_STRLEN_P(body) + 2);
 
-  bufs[buf_len].base = response->response;
-  bufs[buf_len].len = strlen(Z_STRVAL_P(body));
+  writer->buf.base = writer->data;
+  sprintf(writer->buf.base, "%s", Z_STRVAL_P(body));
+  writer->buf.len = strlen(Z_STRVAL_P(body));
 
-  response->request.data = response;
-  uv_write( &response->request
+  writer->request.data = &response->handle;
+
+  uv_write( &writer->request
           , (uv_stream_t*)response->socket
-          , bufs
-          , ++buf_len
+          , &writer->buf
+          , 1
           , _after_http_response_end
           );
 
