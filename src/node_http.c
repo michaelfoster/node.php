@@ -14,6 +14,10 @@
 
 // auxilary node_http_response methods
 uv_buf_t _http_response_send_headers(http_response_t *self, int send);
+void _http_response_send_prefix_if_chunked(http_response_t *self, long length);
+void _http_response_after_send_prefix(uv_write_t *writer, int status);
+void _http_response_end_chunked_stream(http_response_t *self);
+void _http_response_after_chunked_stream(uv_write_t *writer, int status);
 int _http_response_set_status_string(char *buf, zval *status);
 size_t _http_response_get_header_length(http_response_t *self);
 void _http_response_default_headers(http_response_t *self);
@@ -23,8 +27,7 @@ void _http_response_set_default_header(http_response_t *self,
                                        char *val, size_t val_len);
 uv_buf_t _http_response_send_headers_if_not_sent(http_response_t *self, 
                                                  int send);
-void _http_response_write(http_response_t *self, char *data, size_t len);
-void _http_response_end(http_response_t *self, char *data, size_t len);
+int _http_response_write(http_response_t *self, zval *data, int end);
 
 // libuv callbacks
 void _on_http_connection(uv_stream_t* server_handle, int status);
@@ -115,7 +118,9 @@ zend_object_value http_response_new(zend_class_entry *class_type TSRMLS_DC) {
   ALLOC_INIT_ZVAL(response->headers);
   array_init(response->headers);
   Z_ADDREF_P(response->headers);
+
   response->headers_sent = 0;
+  response->is_chunked = 0;
   response->status = NULL;
 
   zend_object_std_init(&response->obj, class_type TSRMLS_CC);
@@ -298,13 +303,15 @@ int _http_on_message_complete(http_parser *parser) {
 
 void _after_http_response_end(uv_write_t *request, int status) {
   http_write_t *writer = (http_write_t*) request;
-  zend_object_handle *obj_ref = (zend_object_handle*) request->data;
+  http_response_t *self = (http_response_t*) request->data;
   uv_stream_t *handle = request->handle;
 
-  zend_objects_store_del_ref_by_handle(*obj_ref);
+  zend_objects_store_del_ref_by_handle(self->handle);
   efree(writer);
 
-  uv_close((uv_handle_t*) handle, _http_on_close);
+  if (!self->is_chunked) {
+    uv_close((uv_handle_t*) handle, _http_on_close);
+  }
 }
 
 // node_http_response auxilary methods
@@ -316,6 +323,7 @@ uv_buf_t _http_response_send_headers(http_response_t *self, int send) {
   ulong index;
   uv_buf_t *buf;
   http_write_t *writer;
+  //int offset;
 
   _http_response_default_headers(self);
 
@@ -330,11 +338,10 @@ uv_buf_t _http_response_send_headers(http_response_t *self, int send) {
     buf = &tmp_buf;
     tmp_buf.base = emalloc(header_len);
   }
-  
-  buf->len = header_len;
 
   _http_response_set_status_string(buf->base, self->status);
 
+  //offset = HTTP_OK_LEN;
   for(zend_hash_internal_pointer_reset(ht); 
       zend_hash_get_current_data(ht, (void**) &data) == SUCCESS; 
       zend_hash_move_forward(ht)) { 
@@ -343,9 +350,15 @@ uv_buf_t _http_response_send_headers(http_response_t *self, int send) {
     strcat(buf->base, ": ");
     strcat(buf->base, Z_STRVAL_PP(data));
     strcat(buf->base, "\r\n");
+    //sprintf(&buf->base[offset], "%s: %s\r\n", key, Z_STRVAL_PP(data));
   }
 
-  strcat(buf->base, "\r\n");
+  if (!self->is_chunked) {
+    buf->len = header_len;
+    strcat(buf->base, "\r\n");
+  } else {
+    buf->len = header_len - 3;
+  }
 
   if (!send) { return *buf; }
 
@@ -355,6 +368,8 @@ uv_buf_t _http_response_send_headers(http_response_t *self, int send) {
           , 1
           , _after_http_response_send_headers
           );
+
+  self->headers_sent = 1;
 
   return *buf;
 }
@@ -403,11 +418,15 @@ void _http_response_default_headers(http_response_t *self) {
 
   int result = zend_hash_exists( Z_ARRVAL_P(self->headers)
                                , "Content-Length"
-                               , 14
+                               , 15
                                );
-  if (result) { return; }
-  // TODO: fix this hash lookup
-  return;
+
+  if (result) {
+    self->is_chunked = 0;
+    return;
+  } else {
+    self->is_chunked = 1;
+  }
 
   zval **encodings;
   result = zend_hash_find( Z_ARRVAL_P(self->headers)
@@ -461,12 +480,106 @@ uv_buf_t _http_response_send_headers_if_not_sent(http_response_t *self,
   return buf;
 }
 
-void _http_response_write(http_response_t *self, char *data, size_t len) {
-  
+int _http_response_write(http_response_t *self, zval *data, int end) {
+
+  zend_objects_store_add_ref_by_handle(self->handle);
+
+  if (self->headers_sent) {
+    if (!self->is_chunked) {
+      return 0;
+    } else {
+      self->is_chunked = 1;
+    }
+  } else {
+    if (end) {
+      zval *length;
+      MAKE_STD_ZVAL(length);
+      ZVAL_LONG(length, Z_STRLEN_P(data));
+      convert_to_string(length);
+      _http_response_set_default_header( self
+                                       , "Content-Length"
+                                       , 14
+                                       , Z_STRVAL_P(length)
+                                       , Z_STRLEN_P(length)
+                                       );
+    } else {
+      self->is_chunked = 1;
+    }
+  }
+
+  _http_response_send_headers_if_not_sent(self, 1);
+  _http_response_send_prefix_if_chunked(self, Z_STRLEN_P(data));
+
+  http_write_t *writer = emalloc(sizeof(http_write_t));
+
+  writer->buf.base = Z_STRVAL_P(data);
+  writer->buf.len = strlen(Z_STRVAL_P(data));
+
+  writer->request.data = self;
+
+  uv_write( &writer->request
+          , (uv_stream_t*)self->socket
+          , &writer->buf
+          , 1
+          , _after_http_response_end
+          );
+
+  if (end && self->is_chunked) {
+    _http_response_end_chunked_stream(self);
+  }
+
+  return 1;
 }
 
-void _http_response_end(http_response_t *self, char *data, size_t len) {
+void _http_response_send_prefix_if_chunked(http_response_t *self, long length) {
+
+  if (!self->is_chunked) { return; }
+
+  int digits = 0;
+  if (length) {
+    for(long i = length; i; i /= 10) { digits++; }
+  } else {
+    digits = 1;
+  }
+
+  http_write_t *writer = emalloc(sizeof(http_write_t) + digits + 2);
+
+  writer->buf.base = writer->data;
+  sprintf(writer->buf.base, "\r\n%lX\r\n", length);
+  writer->buf.len = digits + 4;
+
+  uv_write( &writer->request
+          , (uv_stream_t*)self->socket
+          , &writer->buf
+          , 1
+          , _http_response_after_send_prefix
+          );
+}
+
+void _http_response_after_send_prefix(uv_write_t *writer, int status) {
+  efree(writer);
+}
+
+void _http_response_end_chunked_stream(http_response_t *self) {
+  http_write_t *writer = emalloc(sizeof(http_write_t));
+
+  writer->buf.base = "\r\n0\r\n\r\n";
+  writer->buf.len = 7;
+  writer->request.data = self;
+
+  uv_write( &writer->request
+          , (uv_stream_t*)self->socket
+          , &writer->buf
+          , 1
+          , _http_response_after_chunked_stream
+          );
+}
+
+void _http_response_after_chunked_stream(uv_write_t *writer, int status) {
+  http_response_t *self = (http_response_t *) writer->data;
   
+  efree(writer);
+  uv_close((uv_handle_t*) self->socket, _http_on_close);
 }
 
 // class methods
@@ -674,14 +787,7 @@ PHP_METHOD(node_http_response, addTrailers) {
 }
 
 PHP_METHOD(node_http_response, write) {
-  // TODO: implement
-  // NOTE: takes body as a string
-  RETURN_NULL();
-}
-
-PHP_METHOD(node_http_response, end) {
   zval *body;
-  zend_object *self;
   http_response_t *response;
   int result = zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "z", &body);
 
@@ -689,40 +795,17 @@ PHP_METHOD(node_http_response, end) {
     RETURN_BOOL(0);
   }
 
-  self = zend_object_store_get_object(getThis() TSRMLS_CC);
-  response = (http_response_t*) self;
-  zend_objects_store_add_ref_by_handle(response->handle);
+  RETURN_BOOL(_http_response_write(response, body, 0));
+}
 
-  zval *length;
-  MAKE_STD_ZVAL(length)
-  ZVAL_LONG(length, Z_STRLEN_P(body));
-  convert_to_string(length);
+PHP_METHOD(node_http_response, end) {
+  zval *body;
+  http_response_t *response;
+  int result = zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "z", &body);
 
-  _http_response_set_default_header( response
-                                   , "Content-Length"
-                                   , 14
-                                   , Z_STRVAL_P(length)
-                                   , Z_STRLEN_P(length)
-                                   );
+  if (result == FAILURE || Z_TYPE_P(body) != IS_STRING) {
+    RETURN_BOOL(0);
+  }
 
-  zval_ptr_dtor(&length);
-
-  _http_response_send_headers_if_not_sent(response, 1);
-
-  http_write_t *writer = emalloc(sizeof(http_write_t) + Z_STRLEN_P(body) + 2);
-
-  writer->buf.base = writer->data;
-  sprintf(writer->buf.base, "%s", Z_STRVAL_P(body));
-  writer->buf.len = strlen(Z_STRVAL_P(body));
-
-  writer->request.data = &response->handle;
-
-  uv_write( &writer->request
-          , (uv_stream_t*)response->socket
-          , &writer->buf
-          , 1
-          , _after_http_response_end
-          );
-
-  RETURN_BOOL(1);
+  RETURN_BOOL(_http_response_write(response, body, 1));
 }
