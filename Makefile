@@ -19,7 +19,7 @@ CFLAGS += -DPIC
 CFLAGS += -fno-common
 CFLAGS += -fPIC
 
-CFLAGS_FAST = $(CFLAGS) -O2 -g
+CFLAGS_FAST = $(CFLAGS) -O0 -g
 CFLAGS_DEBUG = $(CFLAGS) -O0 -g
 
 LDFLAGS = -bundle -flat_namespace -undefined suppress
